@@ -1,0 +1,6 @@
+{
+  "name": "Relational Skills Atlas",
+  "description": "An all-in-one personal development, skills tracking, and e-learning platform with project skill assessment, custom syllabus generation, and portfolio building.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
