@@ -10,6 +10,7 @@ import {
   REP_DIMENSIONS,
   REPDimension,
 } from '../types';
+import { generateTailoredSyllabus } from '../lib/generators';
 import {
   BookOpen,
   Sparkles,
@@ -260,12 +261,13 @@ export const SyllabusGeneratorFlow: React.FC = () => {
   const handleGenerateSyllabus = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!goal.trim()) {
-      alert('Please enter the skill or competency you wish to learn.');
       return;
     }
 
     setIsGenerating(true);
     const combinedTeachingStyle = `${teachingStyle}. Emphasized pedagogy formats: ${selectedStyleTags.join(', ')}`;
+
+    let generatedSyllabusData: any = null;
 
     try {
       const response = await fetch('/api/generate-syllabus', {
@@ -284,78 +286,103 @@ export const SyllabusGeneratorFlow: React.FC = () => {
         }),
       });
 
-      const data = await response.json();
-      if (data.syllabus) {
-        // Prepare resources with custom links included
-        const created = addSyllabus({
-          title: data.syllabus.title || `${goal} Learning Syllabus`,
-          goal_description: data.syllabus.goal_description || goal,
-          catalyst: data.syllabus.catalyst || 'Relational reasoning across multi-scale feedback loops',
-          spiral_phase: data.syllabus.spiral_phase || 'Initiation',
-          status: 'Active',
-          domain: data.syllabus.domain || selectedDomain,
-          target_project: projectIdea,
-          teaching_style_notes: combinedTeachingStyle,
-          modules: (data.syllabus.modules || []).map((m: any, idx: number) => {
-            // Include custom user-provided links in the module resources
-            const extraResources: ModuleResource[] = [];
-            if (customLinks.length > 0 && idx === 0) {
-              customLinks.forEach((cl) => {
-                extraResources.push({
-                  title: cl.title,
-                  url: cl.url,
-                  type: cl.platform,
-                  source: cl.platform,
-                  summary: cl.notes || 'Learner-provided integrated course reference.',
-                  isCustom: true,
-                });
-              });
-            }
-
-            return {
-              ...m,
-              id: 'mod_' + Math.random().toString(36).substring(2, 9),
-              syllabus_id: '',
-              completion_status: 'Not Started',
-              resources: [...(m.resources || []), ...extraResources],
-              lesson_content: {
-                ...(m.lesson_content || {}),
-                quiz: m.lesson_content?.quiz || [
-                  {
-                    question: `In this module on ${m.title}, what is the foundational relational insight?`,
-                    options: [
-                      'Treating boundaries as reciprocal socio-technical feedback agreements.',
-                      'Assuming individual nodes operate independently of systemic risk.',
-                      'Prioritizing rigid static checklists over dynamic environmental adaptation.',
-                      'Centralizing all governance decisions into a single unilateral silo.',
-                    ],
-                    correctIndex: 0,
-                    explanation:
-                      'Relational pedagogy emphasizes that units cannot be analyzed in isolation from the feedback loops that sustain them.',
-                  },
-                  {
-                    question: 'How does multi-scale translation prevent systemic failure?',
-                    options: [
-                      'By ignoring localized technical traces.',
-                      'By mapping micro operational actions directly to meso workflows and macro statutory policies.',
-                      'By relying solely on financial audits.',
-                      'By maintaining strict organizational data silos.',
-                    ],
-                    correctIndex: 1,
-                    explanation:
-                      'Bridging micro, meso, and macro scales ensures that operational anomalies inform macro governance before cascading into systemic collapse.',
-                  },
-                ],
-              },
-            };
-          }),
-        });
-
-        setSelectedSyllabusId(created.id);
-        setActiveView('roadmap');
+      if (response.ok) {
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const data = await response.json();
+          if (data && data.syllabus) {
+            generatedSyllabusData = data.syllabus;
+          }
+        }
       }
     } catch (err) {
-      console.error('Error generating syllabus:', err);
+      console.warn('Network or API route unavailable, using relational generator:', err);
+    }
+
+    // If serverless endpoint returned 404/500 or network was offline, use generator
+    if (!generatedSyllabusData) {
+      generatedSyllabusData = generateTailoredSyllabus({
+        goal,
+        projectIdea,
+        domains: [selectedDomain],
+        scaleFocus,
+        teachingStyle: combinedTeachingStyle,
+        startingLevel,
+        learningPace,
+        externalIntegrations: integrations,
+        customExternalLinks: customLinks,
+      });
+    }
+
+    try {
+      const created = addSyllabus({
+        title: generatedSyllabusData.title || `${goal} Learning Syllabus`,
+        goal_description: generatedSyllabusData.goal_description || goal,
+        catalyst: generatedSyllabusData.catalyst || 'Relational reasoning across multi-scale feedback loops',
+        spiral_phase: generatedSyllabusData.spiral_phase || 'Initiation',
+        status: 'Active',
+        domain: generatedSyllabusData.domain || selectedDomain,
+        target_project: projectIdea,
+        teaching_style_notes: combinedTeachingStyle,
+        modules: (generatedSyllabusData.modules || []).map((m: any, idx: number) => {
+          // Include custom user-provided links in module resources
+          const extraResources: ModuleResource[] = [];
+          if (customLinks.length > 0 && idx === 0) {
+            customLinks.forEach((cl) => {
+              extraResources.push({
+                title: cl.title,
+                url: cl.url,
+                type: cl.platform,
+                source: cl.platform,
+                summary: cl.notes || 'Learner-provided integrated course reference.',
+                isCustom: true,
+              });
+            });
+          }
+
+          return {
+            ...m,
+            id: m.id || 'mod_' + Math.random().toString(36).substring(2, 9),
+            syllabus_id: '',
+            completion_status: 'Not Started',
+            resources: [...(m.resources || []), ...extraResources],
+            lesson_content: {
+              ...(m.lesson_content || {}),
+              quiz: m.lesson_content?.quiz || [
+                {
+                  question: `In this module on ${m.title}, what is the foundational relational insight?`,
+                  options: [
+                    'Treating boundaries as reciprocal socio-technical feedback agreements.',
+                    'Assuming individual nodes operate independently of systemic risk.',
+                    'Prioritizing rigid static checklists over dynamic environmental adaptation.',
+                    'Centralizing all governance decisions into a single unilateral silo.',
+                  ],
+                  correctIndex: 0,
+                  explanation:
+                    'Relational pedagogy emphasizes that units cannot be analyzed in isolation from the feedback loops that sustain them.',
+                },
+                {
+                  question: 'How does multi-scale translation prevent systemic failure?',
+                  options: [
+                    'By ignoring localized technical traces.',
+                    'By mapping micro operational actions directly to meso workflows and macro statutory policies.',
+                    'By relying solely on financial audits.',
+                    'By maintaining strict organizational data silos.',
+                  ],
+                  correctIndex: 1,
+                  explanation:
+                    'Bridging micro, meso, and macro scales ensures that operational anomalies inform macro governance before cascading into systemic collapse.',
+                },
+              ],
+            },
+          };
+        }),
+      });
+
+      setSelectedSyllabusId(created.id);
+      setActiveView('roadmap');
+    } catch (saveErr) {
+      console.error('Error saving generated syllabus:', saveErr);
     } finally {
       setIsGenerating(false);
     }

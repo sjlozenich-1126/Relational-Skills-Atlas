@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { DomainCategory, DOMAIN_CATEGORIES, Skill, Project, AcquisitionType, ProjectStatus } from '../types';
+import { assessProjectLocally } from '../lib/generators';
 import {
   Upload,
   FileText,
@@ -217,18 +218,29 @@ export const ProjectAssessmentFlow: React.FC = () => {
         }),
       });
 
-      const data = await response.json();
-      if (data.skills && data.skills.length > 0) {
-        setExtractedSkills(data.skills);
-        setCvWording(data.cv_wording || []);
-        setRepSummary(data.rep_summary || {});
+      if (response.ok) {
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const data = await response.json();
+          if (data.skills && data.skills.length > 0) {
+            setExtractedSkills(data.skills);
+            setCvWording(data.cv_wording || []);
+            setRepSummary(data.rep_summary || {});
+            return;
+          }
+        }
       }
     } catch (err) {
-      console.error('Assessment API call error, falling back locally', err);
-    } finally {
-      setIsExtracting(false);
-      setStep(3);
+      console.warn('Assessment API call error, falling back locally:', err);
     }
+
+    // Local fallback ensures assessment always yields high quality skills
+    const localResult = assessProjectLocally(title, category, description, notes);
+    setExtractedSkills(localResult.skills);
+    setCvWording(localResult.cv_wording);
+    setRepSummary(localResult.rep_summary);
+    setIsExtracting(false);
+    setStep(3);
   };
 
   const handleSaveToProfile = () => {

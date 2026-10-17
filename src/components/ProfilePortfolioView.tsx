@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
+import { generateCvWordingLocally } from '../lib/generators';
 import {
   User as UserIcon,
   Sparkles,
@@ -76,18 +77,28 @@ export const ProfilePortfolioView: React.FC = () => {
         }),
       });
 
-      const data = await response.json();
-      if (data.bullet_points) {
-        setCvBullets(data.bullet_points);
-      }
-      if (data.summary) {
-        setExecutiveSummary(data.summary);
+      if (response.ok) {
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const data = await response.json();
+          if (data.bullet_points && data.bullet_points.length > 0) {
+            setCvBullets(data.bullet_points);
+            if (data.summary) {
+              setExecutiveSummary(data.summary);
+            }
+            return;
+          }
+        }
       }
     } catch (err) {
-      console.error('Error generating CV wording:', err);
-    } finally {
-      setIsGeneratingCv(false);
+      console.warn('Error connecting to CV wording API, falling back locally:', err);
     }
+
+    // Local fallback
+    const localCv = generateCvWordingLocally(targetRole, skills, projects);
+    setCvBullets(localCv.bullet_points);
+    setExecutiveSummary(localCv.summary);
+    setIsGeneratingCv(false);
   };
 
   const handleCopyBullet = (text: string, idx: number) => {

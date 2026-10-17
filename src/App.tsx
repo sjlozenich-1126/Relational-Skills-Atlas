@@ -7,6 +7,8 @@ import { ProjectAssessmentFlow } from './components/ProjectAssessmentFlow';
 import { SyllabusGeneratorFlow } from './components/SyllabusGeneratorFlow';
 import { CourseStudioFlow } from './components/CourseStudioFlow';
 import { ProfilePortfolioView } from './components/ProfilePortfolioView';
+import { AuthGuard } from './components/AuthGuard';
+import { AuthModal } from './components/AuthModal';
 
 const MainContent: React.FC = () => {
   const { activeTab, setActiveTab } = useApp();
@@ -17,12 +19,29 @@ const MainContent: React.FC = () => {
 
       <main className="flex-1 pb-16">
         {activeTab === 'home' && <HomeScreen />}
-        {activeTab === 'dashboard' && <DashboardView />}
+        {activeTab === 'dashboard' && (
+          <AuthGuard
+            viewName="Personal Skills Dashboard"
+            description="Sign in with your email and password to access your personalized radar analytics, skill inventory, and system metrics."
+          >
+            <DashboardView />
+          </AuthGuard>
+        )}
         {activeTab === 'assess' && <ProjectAssessmentFlow />}
         {activeTab === 'learn' && <SyllabusGeneratorFlow />}
         {activeTab === 'teach' && <CourseStudioFlow />}
-        {activeTab === 'profile' && <ProfilePortfolioView />}
+        {activeTab === 'profile' && (
+          <AuthGuard
+            viewName="Learner Profile & CV Portfolio"
+            description="Sign in with your email and password to customize your personal profile, credentials, and exportable CV portfolio."
+          >
+            <ProfilePortfolioView />
+          </AuthGuard>
+        )}
       </main>
+
+      {/* Global Supabase Auth Modal */}
+      <AuthModal />
 
       {/* Quiet Google Account style Footer */}
       <footer className="border-t border-[#E0E0E0] bg-white py-6 mt-auto">

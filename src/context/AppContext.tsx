@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { Session, User as SupabaseUser } from '@supabase/supabase-js';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import {
   User,
   Project,
@@ -19,6 +21,25 @@ import {
 } from '../initialData';
 
 interface AppContextType {
+  // Supabase Auth State & Methods
+  session: Session | null;
+  supabaseUser: SupabaseUser | null;
+  isAuthenticated: boolean;
+  authLoading: boolean;
+  authError: string | null;
+  isSupabaseConfigured: boolean;
+  signInWithEmail: (email: string, password: string) => Promise<{ error: string | null }>;
+  signUpWithEmail: (
+    email: string,
+    password: string,
+    name?: string
+  ) => Promise<{ error: string | null; message?: string }>;
+  signOut: () => Promise<void>;
+  isAuthModalOpen: boolean;
+  authModalMode: 'signin' | 'signup';
+  openAuthModal: (mode?: 'signin' | 'signup') => void;
+  closeAuthModal: () => void;
+
   user: User;
   updateUser: (updated: Partial<User>) => void;
   projects: Project[];
@@ -129,6 +150,241 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [activeTab, setActiveTab] = useState<'home' | 'dashboard' | 'assess' | 'learn' | 'teach' | 'profile'>('home');
   const [selectedSyllabusId, setSelectedSyllabusId] = useState<string | null>(null);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+
+  // Supabase Auth State
+  const [session, setSession] = useState<Session | null>(null);
+  const [supabaseUser, setSupabaseUser] = useState<SupabaseUser | null>(null);
+  const [authLoading, setAuthLoading] = useState<boolean>(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [authModalMode, setAuthModalMode] = useState<'signin' | 'signup'>('signin');
+  const [isDemoAuth, setIsDemoAuth] = useState<boolean>(() => {
+    return typeof window !== 'undefined' ? localStorage.getItem('rsa_demo_auth') === 'true' : false;
+  });
+
+  const isAuthenticated = Boolean(session?.user || (isDemoAuth && !isSupabaseConfigured));
+
+  // Initialize and listen to Supabase Auth state
+  useEffect(() => {
+    let isMounted = true;
+
+    if (isSupabaseConfigured) {
+      supabase.auth.getSession().then(({ data: { session: currentSession }, error }) => {
+        if (!isMounted) return;
+        if (error) {
+          console.warn('Supabase getSession error:', error.message);
+        }
+        setSession(currentSession);
+        setSupabaseUser(currentSession?.user ?? null);
+        if (currentSession?.user) {
+          const email = currentSession.user.email || '';
+          const name =
+            currentSession.user.user_metadata?.full_name ||
+            currentSession.user.user_metadata?.name ||
+            (email ? email.split('@')[0] : '');
+          setUser((prev) => ({
+            ...prev,
+            id: currentSession.user.id || prev.id,
+            email: prev.email || email,
+            name: prev.name || name,
+          }));
+        }
+        setAuthLoading(false);
+      });
+
+      const {
+        data: { subscription },
+      } = supabase.auth.onAuthStateChange((_event, currentSession) => {
+        if (!isMounted) return;
+        setSession(currentSession);
+        setSupabaseUser(currentSession?.user ?? null);
+        if (currentSession?.user) {
+          const email = currentSession.user.email || '';
+          const name =
+            currentSession.user.user_metadata?.full_name ||
+            currentSession.user.user_metadata?.name ||
+            (email ? email.split('@')[0] : '');
+          setUser((prev) => ({
+            ...prev,
+            id: currentSession.user.id || prev.id,
+            email: prev.email || email,
+            name: prev.name || name,
+          }));
+        }
+        setAuthLoading(false);
+      });
+
+      return () => {
+        isMounted = false;
+        subscription.unsubscribe();
+      };
+    } else {
+      const savedDemo = localStorage.getItem('rsa_demo_auth') === 'true';
+      if (savedDemo) {
+        setIsDemoAuth(true);
+      }
+      setAuthLoading(false);
+    }
+  }, []);
+
+  const openAuthModal = (mode: 'signin' | 'signup' = 'signin') => {
+    setAuthModalMode(mode);
+    setIsAuthModalOpen(true);
+  };
+
+  const closeAuthModal = () => {
+    setIsAuthModalOpen(false);
+    setAuthError(null);
+  };
+
+  const signInWithEmail = async (
+    email: string,
+    password: string
+  ): Promise<{ error: string | null }> => {
+    setAuthError(null);
+
+    if (!isSupabaseConfigured) {
+      if (!email.trim() || !password) {
+        return { error: 'Please enter both email and password.' };
+      }
+      setIsDemoAuth(true);
+      localStorage.setItem('rsa_demo_auth', 'true');
+      const cleanEmail = email.trim();
+      const defaultName = cleanEmail.split('@')[0];
+      setUser((prev) => ({
+        ...prev,
+        email: cleanEmail,
+        name: prev.name || defaultName,
+      }));
+      return { error: null };
+    }
+
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+      if (error) {
+        setAuthError(error.message);
+        return { error: error.message };
+      }
+
+      if (data.session) {
+        setSession(data.session);
+        setSupabaseUser(data.user);
+        const userEmail = data.user.email || email.trim();
+        const userName =
+          data.user.user_metadata?.full_name ||
+          data.user.user_metadata?.name ||
+          userEmail.split('@')[0];
+
+        setUser((prev) => ({
+          ...prev,
+          id: data.user.id || prev.id,
+          email: userEmail,
+          name: prev.name || userName,
+        }));
+      }
+      return { error: null };
+    } catch (err: any) {
+      const msg = err?.message || 'Failed to sign in. Please verify your credentials.';
+      setAuthError(msg);
+      return { error: msg };
+    }
+  };
+
+  const signUpWithEmail = async (
+    email: string,
+    password: string,
+    name?: string
+  ): Promise<{ error: string | null; message?: string }> => {
+    setAuthError(null);
+
+    if (!isSupabaseConfigured) {
+      if (!email.trim() || !password) {
+        return { error: 'Please enter both email and password.' };
+      }
+      if (password.length < 6) {
+        return { error: 'Password must be at least 6 characters.' };
+      }
+      setIsDemoAuth(true);
+      localStorage.setItem('rsa_demo_auth', 'true');
+      const cleanEmail = email.trim();
+      const resolvedName = name?.trim() || cleanEmail.split('@')[0];
+      setUser((prev) => ({
+        ...prev,
+        email: cleanEmail,
+        name: resolvedName,
+      }));
+      return { error: null, message: 'Account registered and session active.' };
+    }
+
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email: email.trim(),
+        password,
+        options: {
+          data: {
+            full_name: name?.trim() || email.split('@')[0],
+            name: name?.trim() || email.split('@')[0],
+          },
+        },
+      });
+
+      if (error) {
+        setAuthError(error.message);
+        return { error: error.message };
+      }
+
+      if (data.session) {
+        setSession(data.session);
+        setSupabaseUser(data.user);
+        const userEmail = data.user?.email || email.trim();
+        const userName =
+          name?.trim() ||
+          data.user?.user_metadata?.full_name ||
+          userEmail.split('@')[0];
+
+        setUser((prev) => ({
+          ...prev,
+          id: data.user?.id || prev.id,
+          email: userEmail,
+          name: userName,
+        }));
+        return { error: null, message: 'Registration successful!' };
+      } else if (data.user && !data.session) {
+        return {
+          error: null,
+          message:
+            'Registration successful! Please check your email to verify your address before logging in.',
+        };
+      }
+
+      return { error: null };
+    } catch (err: any) {
+      const msg = err?.message || 'Failed to sign up.';
+      setAuthError(msg);
+      return { error: msg };
+    }
+  };
+
+  const signOut = async () => {
+    try {
+      if (isSupabaseConfigured) {
+        await supabase.auth.signOut();
+      }
+    } catch (err) {
+      console.warn('Sign out error:', err);
+    } finally {
+      setSession(null);
+      setSupabaseUser(null);
+      setIsDemoAuth(false);
+      localStorage.removeItem('rsa_demo_auth');
+      setAuthError(null);
+      setActiveTab((prev) => (prev === 'dashboard' || prev === 'profile' ? 'home' : prev));
+    }
+  };
 
   // Sync to localStorage
   useEffect(() => {
@@ -390,6 +646,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   return (
     <AppContext.Provider
       value={{
+        session,
+        supabaseUser,
+        isAuthenticated,
+        authLoading,
+        authError,
+        isSupabaseConfigured,
+        signInWithEmail,
+        signUpWithEmail,
+        signOut,
+        isAuthModalOpen,
+        authModalMode,
+        openAuthModal,
+        closeAuthModal,
         user,
         updateUser,
         projects,
